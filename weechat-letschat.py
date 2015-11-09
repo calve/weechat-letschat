@@ -18,6 +18,7 @@ rooms_by_id = {}
 users_by_id = {}
 _domain = "pcmt6"  # Should be set by configuration
 _token = "NTYyNzkzODgwNTEwOGUxYTAwNzJiNmIyOjhlNzJhMTY2NDYzZWJjNjVlYzZiZjBkYTc1NDQ2MDA0YTYwZmVjNGI1ODRkNGU0NA=="
+last_id = None
 
 
 def dbg(message, fout=False, main_buffer=False):
@@ -61,7 +62,10 @@ def url_processor_cb(data, command, return_code, out, err):
     dbg("out : {}".format(out))
     out = out.decode('UTF-8')
     if return_code == 0:
-        returned_json = json.loads(out)
+        try:
+            returned_json = json.loads(out)
+        except ValueError as e:
+            dbg(e)
         server = servers.find_by_key('token', data['token'])
         if data['request'] == 'account':
             # We may now update account informations
@@ -72,13 +76,14 @@ def url_processor_cb(data, command, return_code, out, err):
         elif data['request'] == 'rooms':
             for room in returned_json:
                 server.add_room(room)
-        if data['request'] == 'messages':
-            # Process a POSTed message
-            server.add_message(json.loads(out))
-        elif "/messages" in data['request']:
-            # Process a list of GETted messages
-            for message in returned_json:
-                server.add_message(message)
+        elif 'messages' in data['request']:
+            if type(returned_json) is list:
+                # Process a list of GETted messages
+                for message in returned_json:
+                    server.add_message(message)
+            else:
+                # Process a POSTed message
+                server.add_message(returned_json)
         elif data['request'] == 'users':
             for user in returned_json:
                 users.append({user['id']: user['displayName']})
@@ -96,6 +101,12 @@ def buffer_input_cb(b, buffer, data):
     return w.WEECHAT_RC_ERROR
 
 
+def update_messages_room_cb(room, remaining):
+    global last_id
+    dbg("fetching message since {}".format(last_id))
+    async_http_get_request(_domain, server.token, "/rooms/{room}/messages?since_id={since}".format(last_id))
+    return w.WEECHAT_RC_OK
+
 class SearchList(list):
     """
     A normal python list with some syntactic sugar for searchability
@@ -105,6 +116,7 @@ class SearchList(list):
         super(SearchList, self).__init__(self)
 
     def find(self, name):
+        dbg(self.hashtable.keys())
         if name in self.hashtable.keys():
             return self.hashtable[name]
         #this is a fallback to __eq__ if the item isn't in the hashtable already
@@ -177,6 +189,7 @@ class LetschatServer():
         """Retrieve the channels and users list"""
         async_http_get_request(_domain, self.token, "rooms")
         async_http_get_request(_domain, self.token, "users")
+        #w.hook_timer(1000, 0, 0, "update_messages_cb", "")
 
     def add_room(self, room):
         name = room['name']
@@ -185,13 +198,8 @@ class LetschatServer():
         self.rooms.append(room)
 
     def add_message(self, message):
-        room = message['room']
-        text = message['text'].encode('UTF-8', 'replace')
-        name = users_by_id[message['owner']].encode('UTF-8')
-        room_buffer = w.buffer_search("", rooms_by_id[room])
-        # Format username with text
-        data = "{}\t{}".format(name, text)
-        w.prnt_date_tags(room_buffer, int(time.time()), "", data)
+        room = rooms.find_by_key('identifier', message['room'])
+        room.add_message(message)
 
     def create_buffer(self):
         channel_buffer = w.buffer_search("", "{}.{}".format(self.server.domain, self.name))
@@ -233,6 +241,16 @@ class Room():
         }
         dbg(data)
         async_http_post_request(_domain, _token, "messages", data)
+
+    def add_message(self, message):
+        text = message['text'].encode('UTF-8', 'replace')
+        name = users_by_id[message['owner']].encode('UTF-8')
+        # Format username with text
+        data = "{}\t{}".format(name, text)
+        room_buffer = w.buffer_search("", self.name)
+        w.prnt_date_tags(room_buffer, int(time.time()), "", data)
+        self.last_id = message['id']
+        dbg("last_id : {}".format(self.last_id))
 
 if __name__ == "__main__":
     if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE,
