@@ -3,7 +3,7 @@
 [lets-chat](http://sdelements.github.io/lets-chat/) integration in
 [weechat](https://weechat.org/)
 
-This plugin is eavliy experimental and lacks of user-friendlyness
+This plugin is eavily experimental and lacks of user-friendlyness
 
 ## Installation and usage
 
@@ -27,4 +27,4 @@ In weechat, run ``/python load weechat-letschat.py`` to connect to weechat
 ## About
 
 This plugin is heavily derived from
-[weeslack](https://github.com/rawdigits/wee-slack). Thanks
+[weeslack](https://github.com/rawdigits/wee-slack). Thanks to them
