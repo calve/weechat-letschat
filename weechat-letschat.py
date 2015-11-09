@@ -40,7 +40,9 @@ def url_processor_cb(data, command, return_code, out, err):
     Called back when an http request is completed
     """
     data = pickle.loads(data)
-    dbg("url_processor_cb data : {} out :{}".format(data, out))
+    dbg("url_processor_cb data : {}".format(data))
+    dbg("out : {}".format(out))
+    out = out.decode('UTF-8')
     if return_code == 0:
         returned_json = json.loads(out)
         server = servers.find_by_key('token', data['token'])
@@ -59,7 +61,7 @@ def url_processor_cb(data, command, return_code, out, err):
         elif data['request'] == 'users':
             for user in returned_json:
                 users.append({user['id']: user['displayName']})
-                users_by_id[user['id']] = user['displayName'].encode('UTF-8')
+                users_by_id[user['id']] = user['displayName']
 
     return w.WEECHAT_RC_OK
 
@@ -169,20 +171,15 @@ class LetschatServer():
     def add_message(self, message):
         room = message['room']
         text = message['text'].encode('UTF-8', 'replace')
-        name = users_by_id[message['owner']]
+        name = users_by_id[message['owner']].encode('UTF-8')
         # dbg("add message : {}".format(rooms_by_id))
         # dbg("add message : {}".format(message))
         # dbg("add message to room {} ({})".format(room, room))
         room_buffer = w.buffer_search("", rooms_by_id[room])
         dbg("add message ``{}`` to room ``{}`` ({})".format(text, rooms_by_id[room], name))
         # Format username with text
-        try:
-            data = u"{}\t{}".format(name, text)
-            w.prnt_date_tags(room_buffer, int(time.time()), "", data)
-        except UnicodeDecodeError:
-            dbg("unicode decode error")
-            dbg(name)
-            dbg(text)
+        data = "{}\t{}".format(name, text)
+        w.prnt_date_tags(room_buffer, int(time.time()), "", data)
 
     def create_buffer(self):
         channel_buffer = w.buffer_search("", "{}.{}".format(self.server.domain, self.name))
