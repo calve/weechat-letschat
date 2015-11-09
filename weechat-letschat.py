@@ -1,7 +1,8 @@
-# hack to make tests possible.. better way?
+# -*- coding:utf-8 -*-
 import pickle
 import json
 import time
+import urllib
 try:
     import weechat as w
 except:
@@ -27,12 +28,28 @@ def dbg(message, fout=False, main_buffer=False):
     w.prnt("", message)
 
 
-def async_http_request(domain, token, request, post_data=None):
-    url = 'url:http://{token}:nopass@{domain}/{request}'.format(domain=domain, request=request, token=token)
-    context = pickle.dumps({"request": request, "token": token, "post_data": post_data})
+def async_http_get_request(domain, token, request):
+    url = 'url:http://{token}:nopass@{domain}/{request}'.format(
+        domain=domain,
+        request=request,
+        token=token,
+    )
+    context = pickle.dumps({"request": request, "token": token})
     params = {'useragent': 'weechat-letschat 0.0'}
     #dbg("URL: {} context: {} params: {}".format(url, context, params))
     w.hook_process_hashtable(url, params, 20000, "url_processor_cb", context)
+
+
+def async_http_post_request(domain, token, request, post_data=None):
+    url = 'http://{token}:nopass@{domain}/{request}'.format(
+        domain=domain,
+        request=request,
+        token=token,
+    )
+    context = pickle.dumps({"request": request, "token": token, "post_data": post_data})
+    params = {'useragent': 'weechat-letschat 0.0'}
+    command = 'curl -X POST {url} -H "Content-Type: application/json" --data \'{post_data}\''.format(url=url, post_data=json.dumps(post_data))
+    w.hook_process_hashtable(command, params, 20000, "url_processor_cb", context)
 
 # Callbacks
 def url_processor_cb(data, command, return_code, out, err):
@@ -55,7 +72,11 @@ def url_processor_cb(data, command, return_code, out, err):
         elif data['request'] == 'rooms':
             for room in returned_json:
                 server.add_room(room)
+        if data['request'] == 'messages':
+            # Process a POSTed message
+            server.add_message(json.loads(out))
         elif "/messages" in data['request']:
+            # Process a list of GETted messages
             for message in returned_json:
                 server.add_message(message)
         elif data['request'] == 'users':
@@ -70,7 +91,7 @@ def buffer_input_cb(b, buffer, data):
     """
     Called when user want to send a message
     """
-    room = rooms.find(buffer)
+    room = rooms.find_by_key("pointer", str(buffer))
     room.send_message(data)
     return w.WEECHAT_RC_ERROR
 
@@ -150,33 +171,24 @@ class LetschatServer():
         dbg("init server {} with token {}".format(self, self.token))
 
     def connect(self):
-        async_http_request(_domain, self.token, "account")
+        async_http_get_request(_domain, self.token, "account")
 
     def build(self):
         """Retrieve the channels and users list"""
-        async_http_request(_domain, self.token, "rooms")
-        async_http_request(_domain, self.token, "users")
+        async_http_get_request(_domain, self.token, "rooms")
+        async_http_get_request(_domain, self.token, "users")
 
     def add_room(self, room):
         name = room['name']
         ident = room['id']
-        dbg("Found room {}".format(name))
-        self.rooms.append(name)
-        rooms.append(name)
-        rooms_by_id[ident] = name
-        async_http_request(_domain, self.token, "rooms/{}/messages?reverse=false".format(ident))
-        w.buffer_new(name, "buffer_input_cb", "", "buffer_close_cb", "")
-        rooms.update_hashtable()
+        room = Room(self, name, ident)
+        self.rooms.append(room)
 
     def add_message(self, message):
         room = message['room']
         text = message['text'].encode('UTF-8', 'replace')
         name = users_by_id[message['owner']].encode('UTF-8')
-        # dbg("add message : {}".format(rooms_by_id))
-        # dbg("add message : {}".format(message))
-        # dbg("add message to room {} ({})".format(room, room))
         room_buffer = w.buffer_search("", rooms_by_id[room])
-        dbg("add message ``{}`` to room ``{}`` ({})".format(text, rooms_by_id[room], name))
         # Format username with text
         data = "{}\t{}".format(name, text)
         w.prnt_date_tags(room_buffer, int(time.time()), "", data)
@@ -197,21 +209,30 @@ class LetschatServer():
 class Room():
     """Represent a single Room"""
     def __init__(self, server, name, identifier, members=[]):
+        self.server = server
         self.name = name
         self.identifier = identifier
         self.members = set(members)
+        self.pointer = w.buffer_new(name, "buffer_input_cb", "", "buffer_close_cb", "")
+        rooms.append(self)
+        async_http_get_request(_domain, server.token, "rooms/{}/messages?reverse=false".format(identifier))
+        rooms_by_id[identifier] = name
+        rooms.update_hashtable()
+        dbg("Creating room {}".format(self))
 
     def __str__(self):
-        return self.name
+        return "{} ({})".format(self.name, self.pointer)
 
     def __repr__(self):
         return self.name
 
     def send_message(self, message):
-        message = self.linkify_text(message)
-        dbg(message)
-        request = {"type": "message", "channel": self.identifier, "text": message, "myserver": self.server.domain}
-        self.server.send_to_websocket(request)
+        data = {
+            "room": self.identifier,
+            "text": message
+        }
+        dbg(data)
+        async_http_post_request(_domain, _token, "messages", data)
 
 if __name__ == "__main__":
     if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE,
