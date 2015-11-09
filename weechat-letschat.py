@@ -2,7 +2,6 @@
 import pickle
 import json
 import time
-import urllib
 try:
     import weechat as w
 except:
@@ -18,7 +17,6 @@ rooms_by_id = {}
 users_by_id = {}
 _domain = "pcmt6"  # Should be set by configuration
 _token = "NTYyNzkzODgwNTEwOGUxYTAwNzJiNmIyOjhlNzJhMTY2NDYzZWJjNjVlYzZiZjBkYTc1NDQ2MDA0YTYwZmVjNGI1ODRkNGU0NA=="
-last_id = None
 
 
 def dbg(message, fout=False, main_buffer=False):
@@ -48,8 +46,12 @@ def async_http_post_request(domain, token, request, post_data=None):
     )
     context = pickle.dumps({"request": request, "token": token, "post_data": post_data})
     params = {'useragent': 'weechat-letschat 0.0'}
-    command = 'curl -X POST {url} -H "Content-Type: application/json" --data \'{post_data}\''.format(url=url, post_data=json.dumps(post_data))
+    command = 'curl -X POST {url} -H "Content-Type: application/json" --data \'{post_data}\''.format(
+        url=url,
+        post_data=json.dumps(post_data)
+    )
     w.hook_process_hashtable(command, params, 20000, "url_processor_cb", context)
+
 
 # Callbacks
 def url_processor_cb(data, command, return_code, out, err):
@@ -102,10 +104,14 @@ def buffer_input_cb(b, buffer, data):
 
 
 def update_messages_rooms_cb(data, remaining):
-    # Fetch new messages in all rooms
+    """
+    Periodically fetch new messages in all rooms
+    """
     for room in rooms:
-        async_http_get_request(_domain, server.token, "rooms/{}/messages?since_id={}".format(room.identifier, room.last_id))
+        async_http_get_request(_domain, server.token, "rooms/{}/messages?since_id={}"
+                               .format(room.identifier, room.last_id))
     return w.WEECHAT_RC_OK
+
 
 class SearchList(list):
     """
@@ -119,7 +125,7 @@ class SearchList(list):
         dbg(self.hashtable.keys())
         if name in self.hashtable.keys():
             return self.hashtable[name]
-        #this is a fallback to __eq__ if the item isn't in the hashtable already
+        # this is a fallback to __eq__ if the item isn't in the hashtable already
         if self.count(name) > 0:
             self.update_hashtable()
             return self[self.index(name)]
@@ -206,7 +212,10 @@ class LetschatServer():
         if channel_buffer:
             self.channel_buffer = channel_buffer
         else:
-            self.channel_buffer = w.buffer_new("{}.{}".format(self.server.domain, self.name), "buffer_input_cb", self.name, "", "")
+            self.channel_buffer = w.buffer_new("{}.{}".format(self.server.domain, self.name),
+                                               "buffer_input_cb",
+                                               self.name,
+                                               "", "")
             if self.type == "im":
                 w.buffer_set(self.channel_buffer, "localvar_set_type", 'private')
             else:
