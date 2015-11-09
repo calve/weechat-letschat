@@ -3,7 +3,7 @@
 [lets-chat](http://sdelements.github.io/lets-chat/) integration in
 [weechat](https://weechat.org/)
 
-This plugin is eavy experimental and lack of user-friendlyness
+This plugin is eavliy experimental and lacks of user-friendlyness
 
 ## Installation and usage
 
