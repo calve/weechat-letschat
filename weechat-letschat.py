@@ -37,7 +37,6 @@ def async_http_get_request(domain, token, request):
     )
     context = pickle.dumps({"request": request, "token": token})
     params = {'useragent': 'weechat-letschat 0.0'}
-    #dbg("URL: {} context: {} params: {}".format(url, context, params))
     w.hook_process_hashtable(url, params, 20000, "url_processor_cb", context)
 
 
@@ -58,14 +57,15 @@ def url_processor_cb(data, command, return_code, out, err):
     Called back when an http request is completed
     """
     data = pickle.loads(data)
-    dbg("url_processor_cb data : {}".format(data))
-    dbg("out : {}".format(out))
+    # dbg("url_processor_cb data : {}".format(data))
+    # dbg("out : {}".format(out))
     out = out.decode('UTF-8')
     if return_code == 0:
         try:
             returned_json = json.loads(out)
         except ValueError as e:
             dbg(e)
+            return w.WEECHAT_RC_ERROR
         server = servers.find_by_key('token', data['token'])
         if data['request'] == 'account':
             # We may now update account informations
@@ -101,10 +101,10 @@ def buffer_input_cb(b, buffer, data):
     return w.WEECHAT_RC_ERROR
 
 
-def update_messages_room_cb(room, remaining):
-    global last_id
-    dbg("fetching message since {}".format(last_id))
-    async_http_get_request(_domain, server.token, "/rooms/{room}/messages?since_id={since}".format(last_id))
+def update_messages_rooms_cb(data, remaining):
+    # Fetch new messages in all rooms
+    for room in rooms:
+        async_http_get_request(_domain, server.token, "rooms/{}/messages?since_id={}".format(room.identifier, room.last_id))
     return w.WEECHAT_RC_OK
 
 class SearchList(list):
@@ -189,7 +189,7 @@ class LetschatServer():
         """Retrieve the channels and users list"""
         async_http_get_request(_domain, self.token, "rooms")
         async_http_get_request(_domain, self.token, "users")
-        #w.hook_timer(1000, 0, 0, "update_messages_cb", "")
+        w.hook_timer(1000, 0, 0, "update_messages_rooms_cb", "")
 
     def add_room(self, room):
         name = room['name']
@@ -222,6 +222,7 @@ class Room():
         self.identifier = identifier
         self.members = set(members)
         self.pointer = w.buffer_new(name, "buffer_input_cb", "", "buffer_close_cb", "")
+        self.last_id = None
         rooms.append(self)
         async_http_get_request(_domain, server.token, "rooms/{}/messages?reverse=false".format(identifier))
         rooms_by_id[identifier] = name
@@ -250,7 +251,6 @@ class Room():
         room_buffer = w.buffer_search("", self.name)
         w.prnt_date_tags(room_buffer, int(time.time()), "", data)
         self.last_id = message['id']
-        dbg("last_id : {}".format(self.last_id))
 
 if __name__ == "__main__":
     if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE,
